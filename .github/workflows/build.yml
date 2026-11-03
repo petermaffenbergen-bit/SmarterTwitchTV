@@ -82,7 +82,7 @@ jobs:
           set -e
           npm install --no-audit --no-fund
           node release/scripts/maker.js
-          grep -q "de_DELang" release/githubio/js/main.js
+          grep -q "Erneut versuchen" release/githubio/js/main.js
           grep -q "$(echo "$GITHUB_REPOSITORY" | cut -d/ -f1 | tr 'A-Z' 'a-z').github.io" release/githubio/js/main.js
       - name: APK bauen
         if: steps.check.outputs.neu == 'ja'
