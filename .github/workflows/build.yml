@@ -5,17 +5,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+        with:
+          path: SmarterTwitchTV
+      - uses: actions/checkout@v4
+        with:
+          repository: fgl27/media
+          ref: release
+          path: media
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
       - name: APK bauen
-        working-directory: apk
+        working-directory: SmarterTwitchTV/apk
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
           name: SmarterTwitchTV
-          path: apk/app/build/outputs/apk/debug/*.apk
+          path: SmarterTwitchTV/apk/app/build/outputs/apk/debug/*.apk
