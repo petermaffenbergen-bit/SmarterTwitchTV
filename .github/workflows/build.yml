@@ -16,7 +16,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      - name: Android-Lizenzen bestaetigen
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - name: APK bauen
         working-directory: SmarterTwitchTV/apk
         run: |
