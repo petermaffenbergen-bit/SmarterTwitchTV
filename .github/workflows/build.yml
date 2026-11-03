@@ -5,10 +5,22 @@ on:
     - cron: '17 3 * * *'
 permissions:
   contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: build
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      neu: ${{ steps.check.outputs.neu }}
+      tag: ${{ steps.check.outputs.tag }}
+      up: ${{ steps.check.outputs.up }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          path: meinfork
       - uses: actions/checkout@v4
         with:
           repository: YofarDev/SmarterTwitchTV
@@ -18,9 +30,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          SHA=$(git -C SmarterTwitchTV rev-parse --short HEAD)
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event_name }}" = "schedule" ] && gh release list --repo "$GITHUB_REPOSITORY" --limit 50 | grep -q "$SHA"; then
+          UP=$(git -C SmarterTwitchTV rev-parse --short HEAD)
+          MEIN=$(git -C meinfork rev-parse --short HEAD)
+          echo "up=$UP" >> "$GITHUB_OUTPUT"
+          echo "tag=$(date -u +%Y.%m.%d.%H%M)-$UP-$MEIN" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "schedule" ] && gh release list --repo "$GITHUB_REPOSITORY" --limit 50 | grep -q -- "-$UP-$MEIN"; then
+            echo "Keine Aenderungen, nichts zu tun."
             echo "neu=nein" >> "$GITHUB_OUTPUT"
           else
             echo "neu=ja" >> "$GITHUB_OUTPUT"
@@ -31,32 +46,83 @@ jobs:
           repository: fgl27/media
           ref: release
           path: media
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.neu == 'ja'
+        with:
+          node-version: '22'
       - uses: actions/setup-java@v5
         if: steps.check.outputs.neu == 'ja'
         with:
           distribution: temurin
           java-version: '17'
-      - name: Vorbereiten
+      - name: Anpassen (Name, Deutsch, eigene Seite, Update-Pruefung)
         if: steps.check.outputs.neu == 'ja'
         env:
           KEY: ${{ secrets.DEBUG_KEYSTORE }}
         run: |
+          set -e
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           mkdir -p ~/.android
           echo "$KEY" | base64 -d > ~/.android/debug.keystore
-          sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">Twitch</string>|' SmarterTwitchTV/apk/app/src/main/res/values*/strings.xml
+          APP=SmarterTwitchTV/apk/app/src/main
+          sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">Twitch</string>|' $APP/res/values*/strings.xml
+          cp meinfork/selfupdate/SelfUpdater.java $APP/java/com/fgl27/twitch/SelfUpdater.java
+          grep -q "super.onCreate(savedInstanceState);" $APP/java/com/fgl27/twitch/PlayerActivity.java
+          sed -i '0,/super.onCreate(savedInstanceState);/s//super.onCreate(savedInstanceState);\n        SelfUpdater.checkLater(this);/' $APP/java/com/fgl27/twitch/PlayerActivity.java
+          grep -q "SelfUpdater.checkLater(this);" $APP/java/com/fgl27/twitch/PlayerActivity.java
+          mkdir -p $APP/assets
+          echo "$GITHUB_REPOSITORY" > $APP/assets/selfupdate_repo.txt
+          echo "${{ steps.check.outputs.tag }}" > $APP/assets/selfupdate_tag.txt
+          node meinfork/deutsch/anpassen.js SmarterTwitchTV "$GITHUB_REPOSITORY"
+          node meinfork/deutsch/make-de.js SmarterTwitchTV meinfork/deutsch/de.json
+      - name: Oberflaeche bauen
+        if: steps.check.outputs.neu == 'ja'
+        working-directory: SmarterTwitchTV
+        run: |
+          set -e
+          npm install --no-audit --no-fund
+          node release/scripts/maker.js
+          grep -q "de_DELang" release/githubio/js/main.js
+          grep -q "$(echo "$GITHUB_REPOSITORY" | cut -d/ -f1 | tr 'A-Z' 'a-z').github.io" release/githubio/js/main.js
       - name: APK bauen
         if: steps.check.outputs.neu == 'ja'
         working-directory: SmarterTwitchTV/apk
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-      - name: Als Release veroeffentlichen
+      - name: Seite zusammenstellen
         if: steps.check.outputs.neu == 'ja'
+        run: |
+          mkdir _site
+          rsync -a --exclude node_modules --exclude .git --exclude 'apk/app/build' --exclude 'apk/.gradle' --exclude 'apk/build' SmarterTwitchTV/ _site/
+          touch _site/.nojekyll
+          du -sh _site
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.check.outputs.neu == 'ja'
+        with:
+          path: _site
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.neu == 'ja'
+        with:
+          name: Twitch
+          path: SmarterTwitchTV/apk/app/build/outputs/apk/debug/*.apk
+  deploy:
+    needs: build
+    if: needs.build.outputs.neu == 'ja'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Twitch
+          path: apk
+      - name: Als Release veroeffentlichen
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          SHA=${{ steps.check.outputs.sha }}
-          TAG="$(date +%Y.%m.%d.%H%M)-$SHA"
-          cp SmarterTwitchTV/apk/app/build/outputs/apk/debug/*.apk Twitch.apk
-          gh release create "$TAG" Twitch.apk --repo "$GITHUB_REPOSITORY" --title "Twitch $TAG" --notes "Gebaut aus YofarDev/SmarterTwitchTV, Stand $SHA" --latest
+          cp apk/*.apk Twitch.apk
+          gh release create "${{ needs.build.outputs.tag }}" Twitch.apk --repo "$GITHUB_REPOSITORY" --title "Twitch ${{ needs.build.outputs.tag }}" --notes "Gebaut aus YofarDev/SmarterTwitchTV (Stand ${{ needs.build.outputs.up }}), mit deutscher Oberflaeche" --latest
