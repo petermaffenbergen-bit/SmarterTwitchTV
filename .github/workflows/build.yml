@@ -1,29 +1,62 @@
 name: Build APK
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          repository: YofarDev/SmarterTwitchTV
           path: SmarterTwitchTV
+      - name: Neue Version pruefen
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA=$(git -C SmarterTwitchTV rev-parse --short HEAD)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "schedule" ] && gh release list --repo "$GITHUB_REPOSITORY" --limit 50 | grep -q "$SHA"; then
+            echo "neu=nein" >> "$GITHUB_OUTPUT"
+          else
+            echo "neu=ja" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v4
+        if: steps.check.outputs.neu == 'ja'
         with:
           repository: fgl27/media
           ref: release
           path: media
       - uses: actions/setup-java@v5
+        if: steps.check.outputs.neu == 'ja'
         with:
           distribution: temurin
           java-version: '17'
-      - name: Android-Lizenzen bestaetigen
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - name: Vorbereiten
+        if: steps.check.outputs.neu == 'ja'
+        env:
+          KEY: ${{ secrets.DEBUG_KEYSTORE }}
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          mkdir -p ~/.android
+          echo "$KEY" | base64 -d > ~/.android/debug.keystore
+          sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">Twitch</string>|' SmarterTwitchTV/apk/app/src/main/res/values*/strings.xml
       - name: APK bauen
+        if: steps.check.outputs.neu == 'ja'
         working-directory: SmarterTwitchTV/apk
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-      - uses: actions/upload-artifact@v4
-        with:
-          name: SmarterTwitchTV
-          path: SmarterTwitchTV/apk/app/build/outputs/apk/debug/*.apk
+      - name: Als Release veroeffentlichen
+        if: steps.check.outputs.neu == 'ja'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA=${{ steps.check.outputs.sha }}
+          TAG="$(date +%Y.%m.%d.%H%M)-$SHA"
+          cp SmarterTwitchTV/apk/app/build/outputs/apk/debug/*.apk Twitch.apk
+          gh release create "$TAG" Twitch.apk --repo "$GITHUB_REPOSITORY" --title "Twitch $TAG" --notes "Gebaut aus YofarDev/SmarterTwitchTV, Stand $SHA" --latest
