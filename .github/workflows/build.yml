@@ -62,8 +62,9 @@ jobs:
         run: |
           set -e
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          mkdir -p ~/.android
-          echo "$KEY" | base64 -d > ~/.android/debug.keystore
+          if [ -z "$KEY" ]; then echo "::error::Secret DEBUG_KEYSTORE fehlt oder ist leer"; exit 1; fi
+          printf '%s' "$KEY" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/twitch.keystore"
+          keytool -list -v -keystore "$RUNNER_TEMP/twitch.keystore" -storepass android -alias androiddebugkey | grep -q "D3:6D:28:49:C8:42:B1:2C:D0:D4:82:C2:2E:16:A2:8E:52:7B:A0:2C:4F:1B:F4:65:E7:8E:E4:38:F5:DF:B2:51" || { echo "::error::Schluessel im Secret ist nicht der erwartete"; exit 1; }
           APP=SmarterTwitchTV/apk/app/src/main
           sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">Twitch</string>|' $APP/res/values*/strings.xml
           cp meinfork/selfupdate/SelfUpdater.java $APP/java/com/fgl27/twitch/SelfUpdater.java
@@ -88,8 +89,15 @@ jobs:
         if: steps.check.outputs.neu == 'ja'
         working-directory: SmarterTwitchTV/apk
         run: |
+          set -e
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/twitch.keystore" \
+            -Pandroid.injected.signing.store.password=android \
+            -Pandroid.injected.signing.key.alias=androiddebugkey \
+            -Pandroid.injected.signing.key.password=android
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          unzip -p "$APK" 'META-INF/*.RSA' | openssl pkcs7 -inform DER -print_certs | openssl x509 -noout -fingerprint -sha256 | tee /dev/stderr | grep -q "D3:6D:28:49:C8:42:B1:2C" || { echo "::error::APK ist nicht mit dem festen Schluessel signiert"; exit 1; }
       - name: Seite zusammenstellen
         if: steps.check.outputs.neu == 'ja'
         run: |
