@@ -12,8 +12,9 @@ const root = process.argv[2];
 const repo = process.argv[3];
 if (!root || !/^[^/]+\/[^/]+$/.test(repo || '')) throw new Error('Aufruf: node anpassen.js <ordner> <besitzer/repo>');
 const [owner, name] = repo.split('/');
-const OLD_PAGES = 'https://yofardev.github.io/SmarterTwitchTV/';
 const NEW_PAGES = 'https://' + owner.toLowerCase() + '.github.io/' + name + '/';
+// Die Seite des Entwicklers, egal wie sein Projekt gerade heißt (SmarterTwitchTV, SmarterPurpleTV, ...)
+const OLD_PAGES_RE = /https:\/\/yofardev\.github\.io\/[A-Za-z0-9_.-]+\//g;
 
 function walk(dir, exts, out) {
     for (const e of fs.readdirSync(dir, {withFileTypes: true})) {
@@ -29,8 +30,9 @@ function walk(dir, exts, out) {
 let changed = 0;
 for (const f of walk(path.join(root, 'app'), ['.js', '.html'], []).concat(walk(path.join(root, 'apk/app/src/main'), ['.java'], []))) {
     const src = fs.readFileSync(f, 'utf8');
-    if (src.includes(OLD_PAGES)) {
-        fs.writeFileSync(f, src.split(OLD_PAGES).join(NEW_PAGES));
+    const out = src.replace(OLD_PAGES_RE, NEW_PAGES);
+    if (out !== src) {
+        fs.writeFileSync(f, out);
         changed++;
     }
 }
