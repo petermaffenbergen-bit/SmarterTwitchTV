@@ -23,7 +23,7 @@ jobs:
           path: meinfork
       - uses: actions/checkout@v4
         with:
-          repository: YofarDev/SmarterTwitchTV
+          repository: YofarDev/SmarterPurpleTV
           path: SmarterTwitchTV
       - name: Neue Version pruefen
         id: check
@@ -125,4 +125,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp apk/*.apk Twitch.apk
-          gh release create "${{ needs.build.outputs.tag }}" Twitch.apk --repo "$GITHUB_REPOSITORY" --title "Twitch ${{ needs.build.outputs.tag }}" --notes "Gebaut aus YofarDev/SmarterTwitchTV (Stand ${{ needs.build.outputs.up }}), mit deutscher Oberflaeche" --latest
+          gh release create "${{ needs.build.outputs.tag }}" Twitch.apk --repo "$GITHUB_REPOSITORY" --title "Twitch ${{ needs.build.outputs.tag }}" --notes "Gebaut aus YofarDev/SmarterPurpleTV (Stand ${{ needs.build.outputs.up }}), mit deutscher Oberflaeche" --latest
